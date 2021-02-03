@@ -14,7 +14,8 @@ import os
 import sys
 import struct
 from typing import List
-from hashlib import sha256
+from hashlib import sha512
+from binascii import b2a_hex
 
 
 def rand_uint32() -> int:
@@ -41,9 +42,9 @@ def kdf(password: str) -> bytes:
     # same no matter on which system the user types the password
     buf = unicodedata.normalize("NFC", password).encode("utf-8")
 
-    # for the moment, a simple sha256 (100k times)
+    # for the moment, a simple sha512 (100k times)
     for _ in range(100000):
-        buf = sha256(buf).digest()
+        buf = sha512(buf).digest()
 
     return buf
 
@@ -67,12 +68,30 @@ def pretty_print_matrix(m: list):
 
 def encode_bip(buf: list, passphrase: list, password: bytes) -> list:
     # The encoding is simple. Need to hide 24 words in a 16x16 matrix.
+    #
     # Get each byte of the password and extract the row and col coordinates
     # in the buffer where to put the bip word. So, for example if the current
     # password byte is 0xC1, then the current bip word will be stored at
     # row 0xC and column 0x1.
+    #
+    # In case another word of the passphrase has been placed there, attempt to
+    # use the next "coordinates" from the password. The password has 64 bytes,
+    # it's unlikely to consume it all in an attempt to position the words.
+    #
 
-    for word, pbyte in zip(passphrase, password):
+    #print("--> {}".format(b2a_hex(password)))
+    password_iter = iter(password)
+    used_coords = set()
+
+    for word in passphrase:
+        while True:
+            # This will finish via StopIteration or when a suitable coord is found
+            pbyte = next(password_iter)
+            if pbyte not in used_coords:
+                used_coords.add(pbyte)
+                break
+            #print("-- duplicate coord found: {:x}".format(pbyte))
+
         # calculate the index from row and col
         index = ((pbyte & 0b11110000) >> 4) * 16 + (pbyte & 0b00001111)
         buf[index] = word
